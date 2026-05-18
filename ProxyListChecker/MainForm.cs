@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.2.1";
+    public const string AppVersion = "0.3.0";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -25,6 +25,7 @@ public sealed class MainForm : Form
     private readonly Button _btnSave;
     private readonly Button _btnCopy;
     private readonly Button _btnPurgeFail;
+    private readonly Button _btnDiscoverSources;
     private readonly Button _btnUpdate;
     private readonly ProgressBar _progress;
     private readonly TextBox _log;
@@ -134,7 +135,8 @@ public sealed class MainForm : Form
         _btnSave = new Button { Text = "Сохранить рабочие" };
         _btnCopy = new Button { Text = "Копировать в буфер" };
         _btnPurgeFail = new Button { Text = "Удалить нерабочие" };
-        foreach (var b in new[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail })
+        _btnDiscoverSources = new Button { Text = "🔍 Найти источники", BackColor = Color.FromArgb(240, 235, 220) };
+        foreach (var b in new[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources })
         {
             b.AutoSize = true;
             b.AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -142,7 +144,7 @@ public sealed class MainForm : Form
             b.Margin = new Padding(3);
             b.MinimumSize = new Size(0, 34);
         }
-        buttons.Controls.AddRange(new Control[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail });
+        buttons.Controls.AddRange(new Control[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources });
         root.Controls.Add(buttons, 0, 1);
         root.SetColumnSpan(buttons, 2);
 
@@ -195,6 +197,7 @@ public sealed class MainForm : Form
         _btnSave.Click += OnSave;
         _btnCopy.Click += OnCopy;
         _btnPurgeFail.Click += OnPurge;
+        _btnDiscoverSources.Click += async (_, _) => await OnDiscoverSources();
         _btnUpdate.Click += async (_, _) => await OnUpdateApp();
         _themeBox.SelectedIndexChanged += (_, _) => ApplyCurrentTheme();
 
@@ -256,6 +259,7 @@ public sealed class MainForm : Form
         _btnSave.Enabled = !busy;
         _btnCopy.Enabled = !busy;
         _btnPurgeFail.Enabled = !busy;
+        _btnDiscoverSources.Enabled = !busy;
         _btnStop.Enabled = busy;
     }
 
@@ -433,6 +437,42 @@ public sealed class MainForm : Form
         foreach (var r in toRemove) _rows.Remove(r);
         _collected.RemoveAll(c => !keep.Contains(c.ToString()));
         Log($"Удалено {toRemove.Count}. Осталось {_rows.Count}.");
+    }
+
+    private async Task OnDiscoverSources()
+    {
+        _btnDiscoverSources.Enabled = false;
+        _cts = new CancellationTokenSource();
+        SetStatus("Поиск новых источников…");
+        Log("🔍 Поиск через GitHub API…");
+        try
+        {
+            var current = new HashSet<string>(
+                _sourcesBox.Lines.Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#")),
+                StringComparer.OrdinalIgnoreCase);
+            var disc = new SourceDiscovery();
+            var found = await disc.DiscoverAsync(current, maxRepos: 30, maxNew: 100, Log, _cts.Token);
+            if (found.Count == 0)
+            {
+                Log("Новых источников не найдено.");
+                SetStatus("Готов");
+                MessageBox.Show(this, "Новых не нашёл (всё уже в списке или GitHub rate-limit).", "Поиск", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            // дописать с комментарием-разделителем
+            var sb = new System.Text.StringBuilder();
+            sb.Append(_sourcesBox.Text.TrimEnd('\r', '\n'));
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine($"# --- автопоиск {DateTime.Now:yyyy-MM-dd HH:mm} ({found.Count} новых) ---");
+            foreach (var u in found) sb.AppendLine(u);
+            _sourcesBox.Text = sb.ToString();
+            Log($"Добавлено новых источников: {found.Count}");
+            SetStatus("Готов", $"Найдено: {found.Count}");
+        }
+        catch (OperationCanceledException) { Log("Отменено."); }
+        catch (Exception ex) { Log("Ошибка поиска: " + ex.Message); }
+        finally { _btnDiscoverSources.Enabled = true; }
     }
 
     private async Task OnUpdateApp()
