@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.5.1";
+    public const string AppVersion = "0.6.0";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -213,6 +213,7 @@ public sealed class MainForm : Form
 
         LoadDefaults();
         _ = DetectExternalIpAsync();
+        _ = AutoCheckUpdateOnStartupAsync();
     }
 
     private static Label MakeLabel(string text) => new() { Text = text, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
@@ -290,11 +291,18 @@ public sealed class MainForm : Form
         _cts = new CancellationTokenSource();
         SetBusy(true); SetStatus("Сбор…");
         _progress.Style = ProgressBarStyle.Marquee;
+        List<ProxyEntry> list = new();
         try
         {
             var fetcher = new SourceFetcher();
-            var list = await fetcher.FetchAllAsync(urls, Log, _cts.Token);
-            // фильтр по типу
+            // FetchAllAsync САМ обрабатывает отмену и возвращает партиал
+            list = await fetcher.FetchAllAsync(urls, Log, _cts.Token);
+        }
+        catch (Exception ex) { Log("Ошибка сбора: " + ex.Message); }
+
+        // Применяем результат даже если был стоп — у нас уже есть list
+        try
+        {
             var filter = _typeFilterBox.SelectedIndex switch
             {
                 1 => (Func<ProxyEntry, bool>)(e => e.Kind == ProxyKind.Http),
@@ -310,11 +318,10 @@ public sealed class MainForm : Form
             foreach (var e in filtered)
                 _rows.Add(new RowVm { Entry = e, Type = e.Kind.ToString(), Status = "—", Address = e.Address, Note = e.Source ?? "" });
 
-            Log($"Собрано уникальных: {filtered.Count} (всего из источников: {list.Count})");
-            SetStatus("Готов", $"Собрано: {filtered.Count}");
+            bool wasStopped = _cts?.IsCancellationRequested ?? false;
+            Log($"{(wasStopped ? "Остановлено — частично собрано" : "Собрано уникальных")}: {filtered.Count} (всего: {list.Count})");
+            SetStatus("Готов", $"{(wasStopped ? "Частично: " : "Собрано: ")}{filtered.Count}");
         }
-        catch (OperationCanceledException) { Log("Отменено."); }
-        catch (Exception ex) { Log("Ошибка: " + ex.Message); }
         finally { _progress.Style = ProgressBarStyle.Continuous; SetBusy(false); }
     }
 
@@ -538,16 +545,21 @@ public sealed class MainForm : Form
                 MessageBox.Show(this, "На GitHub пока нет релиза с zip.", "Нет обновления", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            if (!rel.IsNewer)
-            {
-                MessageBox.Show(this, $"Актуальная версия {AppVersion}.", "OK", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            var dr = MessageBox.Show(this, $"Доступна {rel.Version} (у вас {AppVersion}). Скачать и перезапустить?", "Обновление", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            // Если есть более новая версия → обычный апдейт
+            // Если версия совпадает или равна — даём принудительно переустановить (могла быть пересборка)
+            string question = rel.IsNewer
+                ? $"Доступна {rel.Version} (у вас {AppVersion}).\n\nСкачать и перезапустить?"
+                : $"Установлена актуальная версия {AppVersion}.\n\nХотите всё равно скачать и переустановить последний релиз {rel.Version} с GitHub?";
+            var dr = MessageBox.Show(this, question, rel.IsNewer ? "Обновление" : "Переустановка",
+                MessageBoxButtons.YesNo, rel.IsNewer ? MessageBoxIcon.Question : MessageBoxIcon.Information);
             if (dr != DialogResult.Yes) return;
+
+            Log($"Скачивание {rel.Tag}…");
             await updater.InstallAsync(rel, Log, CancellationToken.None);
-            await Task.Delay(800);
-            Application.Exit();
+            Log("Закрываю программу для перезапуска…");
+            await Task.Delay(1200);
+            // Жёсткий выход — гарантированно отпустит все хэндлы и порты
+            Environment.Exit(0);
         }
         catch (Exception ex)
         {
@@ -555,6 +567,36 @@ public sealed class MainForm : Form
             MessageBox.Show(this, ex.Message, "Не удалось", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally { _btnUpdate.Enabled = true; }
+    }
+
+    private async Task AutoCheckUpdateOnStartupAsync()
+    {
+        // Тихая проверка через 2 секунды после запуска; если есть новее → ненавязчивый лог + ярлык на кнопке
+        await Task.Delay(2000);
+        try
+        {
+            var updater = new AppUpdater(AppVersion);
+            var rel = await updater.CheckLatestAsync(CancellationToken.None);
+            if (rel == null) return;
+            if (rel.IsNewer)
+            {
+                BeginInvoke(() =>
+                {
+                    Log($"🔔 Доступна новая версия {rel.Version} (у вас {AppVersion}). Нажмите «Обновить».");
+                    _btnUpdate.Text = $"Обновить → {rel.Version}";
+                    _btnUpdate.BackColor = Color.FromArgb(240, 230, 200);
+                    SetStatus("Готов", $"Доступно обновление {rel.Version}");
+                });
+            }
+            else
+            {
+                BeginInvoke(() => Log($"✓ Версия {AppVersion} актуальна (latest на GitHub: {rel.Version})."));
+            }
+        }
+        catch (Exception ex)
+        {
+            BeginInvoke(() => Log("Автопроверка обновлений не удалась: " + ex.Message));
+        }
     }
 }
 

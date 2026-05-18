@@ -20,7 +20,8 @@ public sealed class SourceFetcher
         var result = new List<ProxyEntry>();
         foreach (var url in urls)
         {
-            ct.ThrowIfCancellationRequested();
+            // Прерывание — НЕ кидаем исключение, возвращаем то что уже собрали
+            if (ct.IsCancellationRequested) { log("Остановлено пользователем — сохраняю частичный результат."); break; }
             try
             {
                 log($"GET {url}");
@@ -37,6 +38,11 @@ public sealed class SourceFetcher
                     added++;
                 }
                 log($"  +{added} (total {result.Count})");
+            }
+            catch (OperationCanceledException)
+            {
+                log("Остановлено пользователем — сохраняю частичный результат.");
+                break;
             }
             catch (Exception ex)
             {
