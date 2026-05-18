@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.7.0";
+    public const string AppVersion = "0.8.0";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -28,6 +28,10 @@ public sealed class MainForm : Form
     private readonly Button _btnDiscoverSources;
     private readonly Button _btnMxCheck;
     private readonly TextBox _mxHostBox;
+    private readonly Button _btnCycle;
+    private readonly ComboBox _cycleIntervalBox;
+    private System.Windows.Forms.Timer? _cycleTimer;
+    private bool _cycleRunning;
     private readonly Button _btnUpdate;
     private readonly ProgressBar _progress;
     private readonly TextBox _log;
@@ -149,7 +153,8 @@ public sealed class MainForm : Form
         _btnPurgeFail = new Button { Text = "Удалить нерабочие" };
         _btnDiscoverSources = new Button { Text = "🔍 Найти источники", BackColor = Color.FromArgb(240, 235, 220) };
         _btnMxCheck = new Button { Text = "📨 MX:25 чек", BackColor = Color.FromArgb(220, 235, 245) };
-        foreach (var b in new[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources, _btnMxCheck })
+        _btnCycle = new Button { Text = "🔄 Цикл", BackColor = Color.FromArgb(230, 240, 230) };
+        foreach (var b in new[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources, _btnMxCheck, _btnCycle })
         {
             b.AutoSize = true;
             b.AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -162,7 +167,16 @@ public sealed class MainForm : Form
             "SMTP-сервер для проверки порта 25 через прокси.\n" +
             "OK = через прокси открылся TCP-туннель к указанному хосту:25 и получен banner '220 …'.\n\n" +
             "Варианты: gmail-smtp-in.l.google.com, mxa.mail.ru, mta-sts.outlook.com, alt1.aspmx.l.google.com");
-        buttons.Controls.AddRange(new Control[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources, _btnMxCheck, _mxHostBox });
+
+        _cycleIntervalBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 70, Margin = new Padding(2, 6, 2, 0) };
+        _cycleIntervalBox.Items.AddRange(new object[] { 15, 30, 45, 60 });
+        _cycleIntervalBox.SelectedIndex = 1;
+        var tipCycle = new ToolTip(); tipCycle.SetToolTip(_cycleIntervalBox,
+            "Интервал между прогонами цикла (минут).\n\n" +
+            "Цикл: Собрать → Проверить → дописать OK в cumulative_valid.txt (дедуп) → ждать → повторить.\n" +
+            "Файл копится между запусками программы.");
+
+        buttons.Controls.AddRange(new Control[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources, _btnMxCheck, _mxHostBox, _btnCycle, _cycleIntervalBox });
         root.Controls.Add(buttons, 0, 1);
         root.SetColumnSpan(buttons, 2);
 
@@ -224,12 +238,20 @@ public sealed class MainForm : Form
         _btnPurgeFail.Click += OnPurge;
         _btnDiscoverSources.Click += async (_, _) => await OnDiscoverSources();
         _btnMxCheck.Click += async (_, _) => await OnMxCheck();
+        _btnCycle.Click += (_, _) => ToggleCycle();
         _btnUpdate.Click += async (_, _) => await OnUpdateApp();
         _themeBox.SelectedIndexChanged += (_, _) => ApplyCurrentTheme();
 
         LoadDefaults();
         _ = DetectExternalIpAsync();
         _ = AutoCheckUpdateOnStartupAsync();
+
+        FormClosing += (_, _) =>
+        {
+            _cycleRunning = false;
+            _cycleTimer?.Stop(); _cycleTimer?.Dispose();
+            try { _cts?.Cancel(); } catch { }
+        };
     }
 
     private static Label MakeLabel(string text) => new() { Text = text, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
@@ -513,6 +535,76 @@ public sealed class MainForm : Form
         foreach (var r in toRemove) _rows.Remove(r);
         _collected.RemoveAll(c => !keep.Contains(c.ToString()));
         Log($"Удалено {toRemove.Count}. Осталось {_rows.Count}.");
+    }
+
+    private static readonly string CumulativeValidPath = Path.Combine(AppContext.BaseDirectory, "cumulative_valid.txt");
+
+    private void ToggleCycle()
+    {
+        if (_cycleRunning) { StopCycle(manual: true); return; }
+        StartCycle();
+    }
+
+    private void StartCycle()
+    {
+        int minutes = (int)(_cycleIntervalBox.SelectedItem ?? 30);
+        _cycleRunning = true;
+        _btnCycle.Text = $"⏹ Стоп цикл";
+        _btnCycle.BackColor = Color.FromArgb(245, 220, 220);
+        _cycleIntervalBox.Enabled = false;
+        Log($"🔄 Цикл запущен: каждые {minutes} мин. Накопительный файл: {CumulativeValidPath}");
+        _cycleTimer?.Stop(); _cycleTimer?.Dispose();
+        _cycleTimer = new System.Windows.Forms.Timer { Interval = minutes * 60 * 1000 };
+        _cycleTimer.Tick += async (_, _) => { if (_cycleRunning) await RunOneCycle(); };
+        _cycleTimer.Start();
+        _ = RunOneCycle(); // первый прогон сразу
+    }
+
+    private void StopCycle(bool manual)
+    {
+        _cycleRunning = false;
+        _cycleTimer?.Stop(); _cycleTimer?.Dispose(); _cycleTimer = null;
+        _btnCycle.Text = "🔄 Цикл";
+        _btnCycle.BackColor = Color.FromArgb(230, 240, 230);
+        _cycleIntervalBox.Enabled = true;
+        if (manual)
+        {
+            Log("⏹ Цикл остановлен пользователем.");
+            try { _cts?.Cancel(); } catch { }
+        }
+    }
+
+    private async Task RunOneCycle()
+    {
+        if (!_cycleRunning) return;
+        int minutes = (int)(_cycleIntervalBox.SelectedItem ?? 30);
+        Log($"━━━ Цикл [{DateTime.Now:HH:mm:ss}] старт ━━━");
+        try
+        {
+            await OnCollect();
+            if (!_cycleRunning) return;
+            await OnCheck();
+            if (!_cycleRunning) return;
+            AppendValidToCumulative();
+            if (_cycleRunning)
+                Log($"⏳ Следующий прогон через {minutes} мин.");
+        }
+        catch (Exception ex) { Log("Цикл ошибка: " + ex.Message); }
+    }
+
+    private void AppendValidToCumulative()
+    {
+        var path = CumulativeValidPath;
+        var existing = File.Exists(path)
+            ? new HashSet<string>(File.ReadAllLines(path).Where(l => l.Length > 0 && !l.StartsWith("#")), StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int before = existing.Count;
+        foreach (var r in _rows.Where(r => r.Status == "OK"))
+            existing.Add(r.Entry.ToString());
+        var sorted = existing.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
+        File.WriteAllLines(path, sorted);
+        int added = sorted.Length - before;
+        Log($"💾 cumulative_valid.txt: всего {sorted.Length} (+{added} новых дедупом) → {path}");
     }
 
     private async Task OnMxCheck()
