@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.4.0";
+    public const string AppVersion = "0.5.0";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -107,9 +107,12 @@ public sealed class MainForm : Form
         var tipTest = new ToolTip(); tipTest.SetToolTip(_testUrlBox, "URL, на который пойдёт запрос через каждый прокси.\nOK = успешный ответ. Если URL отдаёт IP — он попадает в Exit IP.");
         opt.Controls.Add(_testUrlBox, 1, 4);
 
-        opt.Controls.Add(MakeLabel("Лимит проверки:"), 0, 5);
+        opt.Controls.Add(MakeLabel("Цель: рабочих:"), 0, 5);
         _checkLimitBox = new NumericUpDown { Minimum = 0, Maximum = 100000, Value = 1000, Increment = 100, Anchor = AnchorStyles.Left, Width = 100 };
-        var tipLimit = new ToolTip(); tipLimit.SetToolTip(_checkLimitBox, "Сколько прокси проверить за один запуск (0 = все).\nПри включённом перемешивании каждый запуск даёт разную выборку.");
+        var tipLimit = new ToolTip(); tipLimit.SetToolTip(_checkLimitBox,
+            "Остановиться когда найдено столько РАБОЧИХ прокси (OK).\n" +
+            "0 = проверить все собранные (без раннего стопа).\n\n" +
+            "Пример: 1000 → перебираем перемешанный список пока\nне накопим 1000 живых, остальные оставляем недопроверенными.");
         opt.Controls.Add(_checkLimitBox, 1, 5);
 
         opt.Controls.Add(MakeLabel("Случайная выборка:"), 0, 6);
@@ -316,19 +319,19 @@ public sealed class MainForm : Form
 
         int threads = (int)_threadsBox.Value;
         int timeoutMs = (int)_timeoutBox.Value;
-        int limit = (int)_checkLimitBox.Value;
+        int goalOk = (int)_checkLimitBox.Value;   // 0 = без раннего стопа
         bool shuffle = _shuffleBox.Checked;
         string testUrl = _testUrlBox.Text.Trim();
         if (string.IsNullOrEmpty(testUrl)) testUrl = "http://api.ipify.org";
 
-        // Выбираем индексы для проверки: с перемешиванием + лимитом → каждый запуск разная выборка
+        // Перемешиваем все собранные индексы; ранний стоп — по достижении цели OK
         var indices = Enumerable.Range(0, _collected.Count).ToList();
         if (shuffle) for (int i = indices.Count - 1; i > 0; i--) { int j = Random.Shared.Next(i + 1); (indices[i], indices[j]) = (indices[j], indices[i]); }
-        if (limit > 0 && indices.Count > limit) indices = indices.Take(limit).ToList();
 
         _progress.Minimum = 0; _progress.Maximum = indices.Count; _progress.Value = 0;
         int preTimeoutMs = Math.Min(1500, Math.Max(400, timeoutMs / 3));
-        Log($"Проверка: {indices.Count} из {_collected.Count} (shuffle={shuffle}, limit={limit}), потоков {threads}, HTTP-таймаут {timeoutMs}мс, pre-check {preTimeoutMs}мс, тест {testUrl}");
+        string goalDesc = goalOk > 0 ? $"цель: {goalOk} OK (ранний стоп)" : "цель: все";
+        Log($"Проверка: {indices.Count} прокси (shuffle={shuffle}, {goalDesc}), потоков {threads}, HTTP-таймаут {timeoutMs}мс, pre-check {preTimeoutMs}мс, тест {testUrl}");
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         int total = indices.Count;
@@ -345,6 +348,9 @@ public sealed class MainForm : Form
         // Pre-check может крутить в 4× больше параллельных потоков — он лёгкий
         using var preSem = new SemaphoreSlim(threads * 4, threads * 4);
         using var sem = new SemaphoreSlim(threads, threads);
+        // Связанный токен: цель достигнута → отменяем все in-flight без логирования
+        var goalCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        bool goalReached = false;
         try
         {
             var tasks = new List<Task>(indices.Count);
@@ -353,6 +359,7 @@ public sealed class MainForm : Form
                 int capturedIdx = idx;
                 tasks.Add(Task.Run(async () =>
                 {
+                    if (goalCts.Token.IsCancellationRequested) return;
                     try
                     {
                         var entry = _collected[capturedIdx];
@@ -368,9 +375,9 @@ public sealed class MainForm : Form
                         else
                         {
                             // 2. Pre-check: быстрый TCP connect; мёртвые порты отсеиваем до HttpClient
-                            await preSem.WaitAsync(_cts.Token);
+                            await preSem.WaitAsync(goalCts.Token);
                             PreCheck.Result pre;
-                            try { pre = await PreCheck.RunAsync(entry, preTimeoutMs, _cts.Token); }
+                            try { pre = await PreCheck.RunAsync(entry, preTimeoutMs, goalCts.Token); }
                             finally { preSem.Release(); }
 
                             if (!pre.Ok)
@@ -382,32 +389,44 @@ public sealed class MainForm : Form
                             else
                             {
                                 // 3. Полная HTTP-проверка через прокси
-                                await sem.WaitAsync(_cts.Token);
-                                try { r = await validator.CheckAsync(entry, _cts.Token); }
+                                await sem.WaitAsync(goalCts.Token);
+                                try { r = await validator.CheckAsync(entry, goalCts.Token); }
                                 finally { sem.Release(); }
                                 _cache.Put(key, r);
                             }
                         }
 
-                        if (r.Ok) Interlocked.Increment(ref ok);
+                        if (r.Ok)
+                        {
+                            int newOk = Interlocked.Increment(ref ok);
+                            if (goalOk > 0 && newOk >= goalOk && !goalReached)
+                            {
+                                goalReached = true;
+                                BeginInvoke(() => Log($"🎯 Цель достигнута: {goalOk} OK. Останавливаю остальные проверки…"));
+                                try { goalCts.Cancel(); } catch { }
+                            }
+                        }
                         pending.Enqueue((capturedIdx, r));
                         int d = Interlocked.Increment(ref done);
                         if (d % 32 == 0 || d == total)
-                            BeginInvoke(() => { _progress.Value = Math.Min(d, _progress.Maximum); SetStatus($"Проверка: {d}/{total}", $"OK: {ok} · кэш: {cacheHits} · TCP-drop: {preDrops}"); FlushBatch(); });
+                            BeginInvoke(() => { _progress.Value = Math.Min(d, _progress.Maximum); SetStatus($"Проверка: {d}/{total}", $"OK: {ok}/{(goalOk > 0 ? goalOk.ToString() : "∞")} · кэш: {cacheHits} · TCP-drop: {preDrops}"); FlushBatch(); });
                     }
                     catch (OperationCanceledException) { }
-                }, _cts.Token));
+                }, goalCts.Token));
             }
             await Task.WhenAll(tasks);
             while (!pending.IsEmpty) FlushBatch();
             sw.Stop();
             _cache.Save();
-            Log($"Готово за {sw.Elapsed.TotalSeconds:F1}с. OK: {ok}/{total}, кэш-хитов: {cacheHits}, отсеяно pre-check'ом: {preDrops}");
+            string finish = goalReached
+                ? $"🎯 Готово за {sw.Elapsed.TotalSeconds:F1}с — цель {goalOk} OK достигнута (проверено {done}/{total})"
+                : $"Готово за {sw.Elapsed.TotalSeconds:F1}с. OK: {ok}/{total}, кэш-хитов: {cacheHits}, отсеяно pre-check'ом: {preDrops}";
+            Log(finish);
             SetStatus("Готов", $"OK: {ok}/{total}");
         }
         catch (OperationCanceledException) { _cache.Save(); Log("Отменено."); }
         catch (Exception ex) { Log("Ошибка: " + ex.Message); }
-        finally { SetBusy(false); }
+        finally { goalCts.Dispose(); SetBusy(false); }
     }
 
     private void ApplyResults(IEnumerable<(int idx, CheckResult r)> results)
