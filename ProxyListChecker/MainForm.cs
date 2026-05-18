@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.8.0";
+    public const string AppVersion = "0.9.0";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -30,6 +30,8 @@ public sealed class MainForm : Form
     private readonly TextBox _mxHostBox;
     private readonly Button _btnCycle;
     private readonly ComboBox _cycleIntervalBox;
+    private readonly CheckBox _cycleHttpBox;
+    private readonly CheckBox _cycleMxBox;
     private System.Windows.Forms.Timer? _cycleTimer;
     private bool _cycleRunning;
     private readonly Button _btnUpdate;
@@ -64,7 +66,7 @@ public sealed class MainForm : Form
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6 };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 540));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 330)); // header
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 360)); // header
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 100)); // buttons
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));  // progress
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 70));   // grid
@@ -80,11 +82,11 @@ public sealed class MainForm : Form
 
         // ====== options ======
         var optGroup = new GroupBox { Text = "Параметры", Dock = DockStyle.Fill, Padding = new Padding(8) };
-        var opt = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 9 };
+        var opt = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 10 };
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
-        for (int i = 0; i < 9; i++) opt.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        for (int i = 0; i < 10; i++) opt.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         optGroup.Controls.Add(opt);
         root.Controls.Add(optGroup, 1, 0);
 
@@ -137,11 +139,23 @@ public sealed class MainForm : Form
         opt.Controls.Add(hint, 1, 7);
         opt.SetColumnSpan(hint, 2);
 
-        opt.Controls.Add(MakeLabel("Тема:"), 0, 8);
+        opt.Controls.Add(MakeLabel("Цикл проверяет:"), 0, 8);
+        var cycleChecksPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
+        _cycleHttpBox = new CheckBox { Text = "HTTP", Checked = true, AutoSize = true, Margin = new Padding(0, 7, 12, 0) };
+        _cycleMxBox = new CheckBox { Text = "MX:25", Checked = false, AutoSize = true, Margin = new Padding(0, 7, 0, 0) };
+        var tipCycleChecks = new ToolTip();
+        tipCycleChecks.SetToolTip(_cycleHttpBox, "HTTP-проверка через прокси на тест-URL (быстро, проверяет общую работоспособность)");
+        tipCycleChecks.SetToolTip(_cycleMxBox, "TCP-туннель к SMTP-серверу на 25 порт через прокси.\nВ файл попадают только прокси, прошедшие ВСЕ включённые проверки.");
+        cycleChecksPanel.Controls.Add(_cycleHttpBox);
+        cycleChecksPanel.Controls.Add(_cycleMxBox);
+        opt.Controls.Add(cycleChecksPanel, 1, 8);
+        opt.SetColumnSpan(cycleChecksPanel, 2);
+
+        opt.Controls.Add(MakeLabel("Тема:"), 0, 9);
         _themeBox = new ComboBox { Dock = DockStyle.Left, Width = 160, DropDownStyle = ComboBoxStyle.DropDownList };
         _themeBox.Items.AddRange(new object[] { "Светлая", "Матрица" });
         _themeBox.SelectedIndex = 0;
-        opt.Controls.Add(_themeBox, 1, 8);
+        opt.Controls.Add(_themeBox, 1, 9);
 
         // ====== buttons ======
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(4), WrapContents = true };
@@ -243,6 +257,7 @@ public sealed class MainForm : Form
         _themeBox.SelectedIndexChanged += (_, _) => ApplyCurrentTheme();
 
         LoadDefaults();
+        LoadUserSettings();
         _ = DetectExternalIpAsync();
         _ = AutoCheckUpdateOnStartupAsync();
 
@@ -251,7 +266,51 @@ public sealed class MainForm : Form
             _cycleRunning = false;
             _cycleTimer?.Stop(); _cycleTimer?.Dispose();
             try { _cts?.Cancel(); } catch { }
+            SaveUserSettings();
         };
+    }
+
+    private void LoadUserSettings()
+    {
+        var s = AppSettings.Load();
+        if (s == null) return;
+        try
+        {
+            if (!string.IsNullOrEmpty(s.Sources)) _sourcesBox.Text = s.Sources;
+            if (s.Threads >= 1 && s.Threads <= _threadsBox.Maximum) _threadsBox.Value = s.Threads;
+            if (s.Timeout >= _timeoutBox.Minimum && s.Timeout <= _timeoutBox.Maximum) _timeoutBox.Value = s.Timeout;
+            if (!string.IsNullOrEmpty(s.TestUrl)) _testUrlBox.Text = s.TestUrl;
+            if (s.GoalOk >= 0 && s.GoalOk <= _checkLimitBox.Maximum) _checkLimitBox.Value = s.GoalOk;
+            _shuffleBox.Checked = s.Shuffle;
+            if (!string.IsNullOrEmpty(s.MxHost)) _mxHostBox.Text = s.MxHost;
+            int idx = Array.IndexOf(new[] { 15, 30, 45, 60 }, s.CycleInterval);
+            if (idx >= 0) _cycleIntervalBox.SelectedIndex = idx;
+            _cycleHttpBox.Checked = s.CycleHttp;
+            _cycleMxBox.Checked = s.CycleMx;
+            if (s.Theme >= 0 && s.Theme < _themeBox.Items.Count) _themeBox.SelectedIndex = s.Theme;
+            if (s.TypeFilter >= 0 && s.TypeFilter < _typeFilterBox.Items.Count) _typeFilterBox.SelectedIndex = s.TypeFilter;
+            Log("⚙ Загружены настройки из settings.json");
+        }
+        catch (Exception ex) { Log("Не удалось применить settings: " + ex.Message); }
+    }
+
+    private void SaveUserSettings()
+    {
+        new AppSettings
+        {
+            Sources = _sourcesBox.Text,
+            Threads = (int)_threadsBox.Value,
+            Timeout = (int)_timeoutBox.Value,
+            TestUrl = _testUrlBox.Text,
+            GoalOk = (int)_checkLimitBox.Value,
+            Shuffle = _shuffleBox.Checked,
+            MxHost = _mxHostBox.Text,
+            CycleInterval = (int)(_cycleIntervalBox.SelectedItem ?? 30),
+            CycleHttp = _cycleHttpBox.Checked,
+            CycleMx = _cycleMxBox.Checked,
+            Theme = _themeBox.SelectedIndex,
+            TypeFilter = _typeFilterBox.SelectedIndex,
+        }.Save();
     }
 
     private static Label MakeLabel(string text) => new() { Text = text, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
@@ -578,33 +637,57 @@ public sealed class MainForm : Form
     {
         if (!_cycleRunning) return;
         int minutes = (int)(_cycleIntervalBox.SelectedItem ?? 30);
-        Log($"━━━ Цикл [{DateTime.Now:HH:mm:ss}] старт ━━━");
+        bool doHttp = _cycleHttpBox.Checked;
+        bool doMx = _cycleMxBox.Checked;
+        if (!doHttp && !doMx)
+        {
+            Log("⚠ Цикл: ни 'HTTP' ни 'MX:25' не отмечены — нечего проверять. Прогон пропущен.");
+            return;
+        }
+        Log($"━━━ Цикл [{DateTime.Now:HH:mm:ss}] старт · HTTP={doHttp} · MX:25={doMx} ━━━");
         try
         {
             await OnCollect();
             if (!_cycleRunning) return;
-            await OnCheck();
-            if (!_cycleRunning) return;
-            AppendValidToCumulative();
-            if (_cycleRunning)
-                Log($"⏳ Следующий прогон через {minutes} мин.");
+            if (doHttp)
+            {
+                await OnCheck();
+                if (!_cycleRunning) return;
+            }
+            if (doMx)
+            {
+                await OnMxCheck();
+                if (!_cycleRunning) return;
+            }
+            AppendValidToCumulative(doHttp, doMx);
+            if (_cycleRunning) Log($"⏳ Следующий прогон через {minutes} мин.");
         }
         catch (Exception ex) { Log("Цикл ошибка: " + ex.Message); }
     }
 
-    private void AppendValidToCumulative()
+    private void AppendValidToCumulative(bool requireHttp, bool requireMx)
     {
         var path = CumulativeValidPath;
         var existing = File.Exists(path)
             ? new HashSet<string>(File.ReadAllLines(path).Where(l => l.Length > 0 && !l.StartsWith("#")), StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int before = existing.Count;
-        foreach (var r in _rows.Where(r => r.Status == "OK"))
-            existing.Add(r.Entry.ToString());
+        // Прокси попадает в файл если прошёл ВСЕ включённые в цикле проверки
+        var valid = _rows.Where(r =>
+            (!requireHttp || r.Status == "OK") &&
+            (!requireMx || r.Mx25.StartsWith("OK", StringComparison.OrdinalIgnoreCase)));
+        foreach (var r in valid) existing.Add(r.Entry.ToString());
         var sorted = existing.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
         File.WriteAllLines(path, sorted);
         int added = sorted.Length - before;
-        Log($"💾 cumulative_valid.txt: всего {sorted.Length} (+{added} новых дедупом) → {path}");
+        string criteria = (requireHttp, requireMx) switch
+        {
+            (true, true) => "HTTP+MX:25",
+            (true, false) => "HTTP",
+            (false, true) => "MX:25",
+            _ => "—",
+        };
+        Log($"💾 cumulative_valid.txt: всего {sorted.Length} (+{added} новых, критерий: {criteria}) → {path}");
     }
 
     private async Task OnMxCheck()
