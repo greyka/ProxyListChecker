@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.6.0";
+    public const string AppVersion = "0.6.1";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -203,7 +203,13 @@ public sealed class MainForm : Form
         // events
         _btnCollect.Click += async (_, _) => await OnCollect();
         _btnCheck.Click += async (_, _) => await OnCheck();
-        _btnStop.Click += (_, _) => _cts?.Cancel();
+        _btnStop.Click += (_, _) =>
+        {
+            try { _cts?.Cancel(); } catch { }
+            _btnStop.Enabled = false;
+            SetStatus("Останавливаю…");
+            Log("⏹ Остановка пользователем — отменяю все in-flight задачи");
+        };
         _btnSave.Click += OnSave;
         _btnCopy.Click += OnCopy;
         _btnPurgeFail.Click += OnPurge;
@@ -370,6 +376,8 @@ public sealed class MainForm : Form
             var tasks = new List<Task>(indices.Count);
             foreach (int idx in indices)
             {
+                // Ранний выход — не плодим новые таски когда уже отменили
+                if (goalCts.Token.IsCancellationRequested) break;
                 int capturedIdx = idx;
                 tasks.Add(Task.Run(async () =>
                 {
