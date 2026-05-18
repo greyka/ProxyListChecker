@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.9.0";
+    public const string AppVersion = "0.9.1";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -66,7 +66,7 @@ public sealed class MainForm : Form
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6 };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 540));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 360)); // header
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 400)); // header
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 100)); // buttons
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));  // progress
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 70));   // grid
@@ -83,10 +83,10 @@ public sealed class MainForm : Form
         // ====== options ======
         var optGroup = new GroupBox { Text = "Параметры", Dock = DockStyle.Fill, Padding = new Padding(8) };
         var opt = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 10 };
-        opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+        opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));   // ярлыки шире чтобы не резалось
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
-        for (int i = 0; i < 10; i++) opt.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        for (int i = 0; i < 10; i++) opt.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         optGroup.Controls.Add(opt);
         root.Controls.Add(optGroup, 1, 0);
 
@@ -140,9 +140,9 @@ public sealed class MainForm : Form
         opt.SetColumnSpan(hint, 2);
 
         opt.Controls.Add(MakeLabel("Цикл проверяет:"), 0, 8);
-        var cycleChecksPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
-        _cycleHttpBox = new CheckBox { Text = "HTTP", Checked = true, AutoSize = true, Margin = new Padding(0, 7, 12, 0) };
-        _cycleMxBox = new CheckBox { Text = "MX:25", Checked = false, AutoSize = true, Margin = new Padding(0, 7, 0, 0) };
+        var cycleChecksPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(0) };
+        _cycleHttpBox = new CheckBox { Text = "HTTP", Checked = true, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 9, 16, 0) };
+        _cycleMxBox = new CheckBox { Text = "MX:25", Checked = false, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 9, 0, 0) };
         var tipCycleChecks = new ToolTip();
         tipCycleChecks.SetToolTip(_cycleHttpBox, "HTTP-проверка через прокси на тест-URL (быстро, проверяет общую работоспособность)");
         tipCycleChecks.SetToolTip(_cycleMxBox, "TCP-туннель к SMTP-серверу на 25 порт через прокси.\nВ файл попадают только прокси, прошедшие ВСЕ включённые проверки.");
@@ -313,7 +313,14 @@ public sealed class MainForm : Form
         }.Save();
     }
 
-    private static Label MakeLabel(string text) => new() { Text = text, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+    private static Label MakeLabel(string text) => new()
+    {
+        Text = text,
+        Dock = DockStyle.Fill,
+        TextAlign = ContentAlignment.MiddleLeft,
+        AutoSize = false,        // не вертикально-переносить
+        AutoEllipsis = true,     // ...если совсем не влезает
+    };
 
     private void LoadDefaults()
     {
