@@ -10,7 +10,7 @@ namespace ProxyListChecker.Services;
 /// </summary>
 public sealed class ProxyValidator
 {
-    public string TestUrl { get; init; } = "https://api.ipify.org";
+    public string TestUrl { get; init; } = "http://www.google.com/generate_204";
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(8);
     public string? MyExternalIp { get; init; } // если знаем — для классификации anonymity
 

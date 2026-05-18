@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.5.0";
+    public const string AppVersion = "0.5.1";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -103,8 +103,15 @@ public sealed class MainForm : Form
         opt.Controls.Add(_timeoutBox, 1, 3);
 
         opt.Controls.Add(MakeLabel("Тест URL:"), 0, 4);
-        _testUrlBox = new TextBox { Text = "http://api.ipify.org", Dock = DockStyle.Fill };
-        var tipTest = new ToolTip(); tipTest.SetToolTip(_testUrlBox, "URL, на который пойдёт запрос через каждый прокси.\nOK = успешный ответ. Если URL отдаёт IP — он попадает в Exit IP.");
+        _testUrlBox = new TextBox { Text = "http://www.google.com/generate_204", Dock = DockStyle.Fill };
+        var tipTest = new ToolTip(); tipTest.SetToolTip(_testUrlBox,
+            "URL, на который пойдёт запрос через каждый прокси. OK = HTTP 2xx.\n\n" +
+            "Дефолт: http://www.google.com/generate_204 — Google connectivity-check,\n" +
+            "отдаёт пустые 204 No Content, самый быстрый и стабильный вариант.\n\n" +
+            "Альтернативы:\n" +
+            "  http://api.ipify.org      — возвращает чистый exit IP в теле (медленнее)\n" +
+            "  http://httpbin.org/ip     — JSON с exit IP\n" +
+            "  http://1.1.1.1/cdn-cgi/trace — Cloudflare trace");
         opt.Controls.Add(_testUrlBox, 1, 4);
 
         opt.Controls.Add(MakeLabel("Цель: рабочих:"), 0, 5);
@@ -322,7 +329,7 @@ public sealed class MainForm : Form
         int goalOk = (int)_checkLimitBox.Value;   // 0 = без раннего стопа
         bool shuffle = _shuffleBox.Checked;
         string testUrl = _testUrlBox.Text.Trim();
-        if (string.IsNullOrEmpty(testUrl)) testUrl = "http://api.ipify.org";
+        if (string.IsNullOrEmpty(testUrl)) testUrl = "http://www.google.com/generate_204";
 
         // Перемешиваем все собранные индексы; ранний стоп — по достижении цели OK
         var indices = Enumerable.Range(0, _collected.Count).ToList();
