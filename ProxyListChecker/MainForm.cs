@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.3.0";
+    public const string AppVersion = "0.4.0";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -95,15 +95,15 @@ public sealed class MainForm : Form
         opt.Controls.Add(_typeFilterBox, 1, 1);
 
         opt.Controls.Add(MakeLabel("Потоки:"), 0, 2);
-        _threadsBox = new NumericUpDown { Minimum = 1, Maximum = 500, Value = 100, Anchor = AnchorStyles.Left, Width = 80 };
+        _threadsBox = new NumericUpDown { Minimum = 1, Maximum = 1000, Value = 200, Anchor = AnchorStyles.Left, Width = 80 };
         opt.Controls.Add(_threadsBox, 1, 2);
 
         opt.Controls.Add(MakeLabel("Таймаут (мс):"), 0, 3);
-        _timeoutBox = new NumericUpDown { Minimum = 1000, Maximum = 30000, Increment = 500, Value = 6000, Anchor = AnchorStyles.Left, Width = 100 };
+        _timeoutBox = new NumericUpDown { Minimum = 1000, Maximum = 30000, Increment = 500, Value = 4000, Anchor = AnchorStyles.Left, Width = 100 };
         opt.Controls.Add(_timeoutBox, 1, 3);
 
         opt.Controls.Add(MakeLabel("Тест URL:"), 0, 4);
-        _testUrlBox = new TextBox { Text = "https://api.ipify.org", Dock = DockStyle.Fill };
+        _testUrlBox = new TextBox { Text = "http://api.ipify.org", Dock = DockStyle.Fill };
         var tipTest = new ToolTip(); tipTest.SetToolTip(_testUrlBox, "URL, на который пойдёт запрос через каждый прокси.\nOK = успешный ответ. Если URL отдаёт IP — он попадает в Exit IP.");
         opt.Controls.Add(_testUrlBox, 1, 4);
 
@@ -319,7 +319,7 @@ public sealed class MainForm : Form
         int limit = (int)_checkLimitBox.Value;
         bool shuffle = _shuffleBox.Checked;
         string testUrl = _testUrlBox.Text.Trim();
-        if (string.IsNullOrEmpty(testUrl)) testUrl = "https://api.ipify.org";
+        if (string.IsNullOrEmpty(testUrl)) testUrl = "http://api.ipify.org";
 
         // Выбираем индексы для проверки: с перемешиванием + лимитом → каждый запуск разная выборка
         var indices = Enumerable.Range(0, _collected.Count).ToList();
@@ -327,10 +327,12 @@ public sealed class MainForm : Form
         if (limit > 0 && indices.Count > limit) indices = indices.Take(limit).ToList();
 
         _progress.Minimum = 0; _progress.Maximum = indices.Count; _progress.Value = 0;
-        Log($"Проверка: {indices.Count} из {_collected.Count} (shuffle={shuffle}, limit={limit}), потоков {threads}, таймаут {timeoutMs}мс, тест {testUrl}");
+        int preTimeoutMs = Math.Min(1500, Math.Max(400, timeoutMs / 3));
+        Log($"Проверка: {indices.Count} из {_collected.Count} (shuffle={shuffle}, limit={limit}), потоков {threads}, HTTP-таймаут {timeoutMs}мс, pre-check {preTimeoutMs}мс, тест {testUrl}");
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        int done = 0, ok = 0, cacheHits = 0;
+        int total = indices.Count;
+        int done = 0, ok = 0, cacheHits = 0, preDrops = 0;
         var pending = new System.Collections.Concurrent.ConcurrentQueue<(int idx, CheckResult r)>();
         void FlushBatch()
         {
@@ -340,45 +342,67 @@ public sealed class MainForm : Form
         }
 
         var validator = new ProxyValidator { TestUrl = testUrl, Timeout = TimeSpan.FromMilliseconds(timeoutMs), MyExternalIp = _myExternalIp };
+        // Pre-check может крутить в 4× больше параллельных потоков — он лёгкий
+        using var preSem = new SemaphoreSlim(threads * 4, threads * 4);
         using var sem = new SemaphoreSlim(threads, threads);
         try
         {
             var tasks = new List<Task>(indices.Count);
-            int total = indices.Count;
             foreach (int idx in indices)
             {
                 int capturedIdx = idx;
-                await sem.WaitAsync(_cts.Token);
                 tasks.Add(Task.Run(async () =>
                 {
                     try
                     {
-                        var key = _collected[capturedIdx].ToString();
+                        var entry = _collected[capturedIdx];
+                        var key = entry.ToString();
                         CheckResult r;
+
+                        // 1. Cache hit
                         if (_cache.TryGet(key, out var hit))
                         {
-                            r = new CheckResult { Entry = _collected[capturedIdx], Ok = hit.Ok, LatencyMs = hit.LatencyMs, ExitIp = hit.ExitIp, Country = hit.Country, Anonymity = hit.Anonymity, Error = hit.Error };
+                            r = new CheckResult { Entry = entry, Ok = hit.Ok, LatencyMs = hit.LatencyMs, ExitIp = hit.ExitIp, Country = hit.Country, Anonymity = hit.Anonymity, Error = hit.Error };
                             Interlocked.Increment(ref cacheHits);
                         }
                         else
                         {
-                            r = await validator.CheckAsync(_collected[capturedIdx], _cts.Token);
-                            _cache.Put(key, r);
+                            // 2. Pre-check: быстрый TCP connect; мёртвые порты отсеиваем до HttpClient
+                            await preSem.WaitAsync(_cts.Token);
+                            PreCheck.Result pre;
+                            try { pre = await PreCheck.RunAsync(entry, preTimeoutMs, _cts.Token); }
+                            finally { preSem.Release(); }
+
+                            if (!pre.Ok)
+                            {
+                                r = new CheckResult { Entry = entry, Ok = false, LatencyMs = pre.LatencyMs, Error = pre.Error };
+                                _cache.Put(key, r);
+                                Interlocked.Increment(ref preDrops);
+                            }
+                            else
+                            {
+                                // 3. Полная HTTP-проверка через прокси
+                                await sem.WaitAsync(_cts.Token);
+                                try { r = await validator.CheckAsync(entry, _cts.Token); }
+                                finally { sem.Release(); }
+                                _cache.Put(key, r);
+                            }
                         }
+
                         if (r.Ok) Interlocked.Increment(ref ok);
                         pending.Enqueue((capturedIdx, r));
                         int d = Interlocked.Increment(ref done);
                         if (d % 32 == 0 || d == total)
-                            BeginInvoke(() => { _progress.Value = Math.Min(d, _progress.Maximum); SetStatus($"Проверка: {d}/{total}", $"OK: {ok} · кэш: {cacheHits}"); FlushBatch(); });
+                            BeginInvoke(() => { _progress.Value = Math.Min(d, _progress.Maximum); SetStatus($"Проверка: {d}/{total}", $"OK: {ok} · кэш: {cacheHits} · TCP-drop: {preDrops}"); FlushBatch(); });
                     }
-                    finally { sem.Release(); }
+                    catch (OperationCanceledException) { }
                 }, _cts.Token));
             }
             await Task.WhenAll(tasks);
             while (!pending.IsEmpty) FlushBatch();
             sw.Stop();
             _cache.Save();
-            Log($"Готово за {sw.Elapsed.TotalSeconds:F1}с. OK: {ok}/{total}, кэш-хитов: {cacheHits}");
+            Log($"Готово за {sw.Elapsed.TotalSeconds:F1}с. OK: {ok}/{total}, кэш-хитов: {cacheHits}, отсеяно pre-check'ом: {preDrops}");
             SetStatus("Готов", $"OK: {ok}/{total}");
         }
         catch (OperationCanceledException) { _cache.Save(); Log("Отменено."); }
