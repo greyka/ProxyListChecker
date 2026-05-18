@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.9.1";
+    public const string AppVersion = "0.9.2";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -66,7 +66,7 @@ public sealed class MainForm : Form
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6 };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 540));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 400)); // header
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 470)); // header (10×40 + paddings)
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 100)); // buttons
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));  // progress
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 70));   // grid
@@ -86,7 +86,7 @@ public sealed class MainForm : Form
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));   // ярлыки шире чтобы не резалось
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
-        for (int i = 0; i < 10; i++) opt.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        for (int i = 0; i < 10; i++) opt.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         optGroup.Controls.Add(opt);
         root.Controls.Add(optGroup, 1, 0);
 
@@ -141,8 +141,8 @@ public sealed class MainForm : Form
 
         opt.Controls.Add(MakeLabel("Цикл проверяет:"), 0, 8);
         var cycleChecksPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(0) };
-        _cycleHttpBox = new CheckBox { Text = "HTTP", Checked = true, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 9, 16, 0) };
-        _cycleMxBox = new CheckBox { Text = "MX:25", Checked = false, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 9, 0, 0) };
+        _cycleHttpBox = new CheckBox { Text = "HTTP", Checked = true, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 12, 16, 0) };
+        _cycleMxBox = new CheckBox { Text = "MX:25", Checked = false, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 12, 0, 0) };
         var tipCycleChecks = new ToolTip();
         tipCycleChecks.SetToolTip(_cycleHttpBox, "HTTP-проверка через прокси на тест-URL (быстро, проверяет общую работоспособность)");
         tipCycleChecks.SetToolTip(_cycleMxBox, "TCP-туннель к SMTP-серверу на 25 порт через прокси.\nВ файл попадают только прокси, прошедшие ВСЕ включённые проверки.");
