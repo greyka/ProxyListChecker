@@ -7,3 +7,4 @@ obj/
 .vscode/
 *.log
 test_cache.json
+*.rar
