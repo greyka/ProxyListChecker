@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Search, Play, Square, FolderGit2 as Github, Star, Plus, Wand2 } from "lucide-react"
+import { Search, Play, Square, FolderGit2 as Github, Star, Plus, Wand2, Loader2 } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
 import { MOCK_DISCOVERY } from "@/lib/mock-data"
 import { toast } from "sonner"
 import { useAppState } from "@/lib/app-state"
@@ -67,8 +68,11 @@ export default function Discover() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold tracking-tight">Discover</h2>
-        <p className="text-sm text-muted-foreground">
+        <div className="section-label">GitHub</div>
+        <h2 className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.02em] text-white">
+          Discover
+        </h2>
+        <p className="mt-2 text-[13px] text-zinc-400">
           Auto-find new proxy list repositories on GitHub.
         </p>
       </div>
@@ -140,14 +144,26 @@ export default function Discover() {
       {running && (
         <Card>
           <CardContent className="space-y-2 p-4 font-mono text-xs">
+            <div className="mb-2 flex items-center gap-2 text-[hsl(var(--accent-cyan))]">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span className="shimmer bg-clip-text text-transparent" style={{ backgroundImage: "linear-gradient(90deg,#a3a3a3,#fff,#a3a3a3)", backgroundSize: "200% 100%" }}>
+                Scanning GitHub…
+              </span>
+            </div>
             {queries.map((q, i) => (
-              <div key={q} className="flex items-center gap-2 text-muted-foreground">
-                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                Searching: <span className="text-foreground">"{q}"</span>
+              <motion.div
+                key={q}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.08 }}
+                className="flex items-center gap-2 text-zinc-400"
+              >
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_8px_rgb(52_211_153/0.7)]" />
+                Searching: <span className="text-zinc-100">"{q}"</span>
                 <span className="ml-auto">
                   {i < 2 ? `found ${30 - i * 8} repos` : "scanning…"}
                 </span>
-              </div>
+              </motion.div>
             ))}
           </CardContent>
         </Card>
@@ -166,10 +182,18 @@ export default function Discover() {
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {MOCK_DISCOVERY.map((repo) => {
+          <AnimatePresence>
+          {MOCK_DISCOVERY.map((repo, idx) => {
             const repoSelected = repo.files.filter((f) => selected.has(`${repo.id}/${f.path}`)).length
             return (
-              <Card key={repo.id}>
+              <motion.div
+                key={repo.id}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ delay: idx * 0.05, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              >
+              <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-start justify-between gap-2 text-base">
                     <span className="flex items-center gap-2 font-mono text-sm">
@@ -208,18 +232,20 @@ export default function Discover() {
                     )
                   })}
                   <Button
-                    variant="outline"
+                    variant="glass"
                     size="sm"
                     className="w-full mt-2"
                     onClick={() => addSelected(repo.fullName, repoSelected)}
                   >
-                    <Plus className="mr-2 h-3.5 w-3.5" />
+                    <Plus className="h-3.5 w-3.5" />
                     Add selected ({repoSelected})
                   </Button>
                 </CardContent>
               </Card>
+              </motion.div>
             )
           })}
+          </AnimatePresence>
         </div>
       )}
     </div>

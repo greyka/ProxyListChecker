@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -55,46 +54,63 @@ const PAGE_SIZE = 12
 
 function typeBadge(t: Proxy["type"]) {
   const cls: Record<string, string> = {
-    HTTP: "bg-blue-500/15 text-blue-500 border-blue-500/30",
-    HTTPS: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30",
-    SOCKS4: "bg-amber-500/15 text-amber-500 border-amber-500/30",
-    SOCKS5: "bg-violet-500/15 text-violet-500 border-violet-500/30",
+    HTTP: "bg-blue-500/12 text-blue-300 border-blue-500/25",
+    HTTPS: "bg-emerald-500/12 text-emerald-300 border-emerald-500/25",
+    SOCKS4: "bg-amber-500/12 text-amber-300 border-amber-500/25",
+    SOCKS5: "bg-violet-500/12 text-violet-300 border-violet-500/25",
   }
   return (
-    <Badge variant="outline" className={`${cls[t]} h-5 px-1.5 text-[10px]`}>
+    <span
+      className={`inline-flex h-5 items-center rounded-md border px-1.5 font-mono text-[10px] font-semibold tracking-wider uppercase ${cls[t]}`}
+    >
       {t}
-    </Badge>
+    </span>
   )
 }
 
 function statusBadge(s: Proxy["status"]) {
   if (s === "OK")
-    return <Badge className="bg-emerald-500 text-white hover:bg-emerald-500">OK</Badge>
+    return (
+      <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 text-[11px] font-medium text-emerald-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgb(52_211_153/0.8)]" />
+        OK
+      </span>
+    )
   if (s === "FAIL")
-    return <Badge variant="destructive">FAIL</Badge>
-  return <Badge variant="outline" className="text-muted-foreground">—</Badge>
+    return (
+      <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 text-[11px] font-medium text-rose-300">
+        <span className="h-1.5 w-1.5 rounded-full bg-rose-400 shadow-[0_0_8px_rgb(244_63_94/0.7)]" />
+        FAIL
+      </span>
+    )
+  return (
+    <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2 text-[11px] text-zinc-500">
+      <span className="h-1.5 w-1.5 rounded-full bg-zinc-500" />
+      —
+    </span>
+  )
 }
 
 function anonymityBadge(a: Proxy["anonymity"]) {
-  if (a === "transparent")
+  const map: Record<string, string> = {
+    transparent: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    anonymous: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+    elite: "border-violet-500/30 bg-violet-500/10 text-violet-300",
+  }
+  if (a === "transparent" || a === "anonymous" || a === "elite") {
     return (
-      <Badge variant="outline" className="border-amber-500/30 bg-amber-500/15 text-amber-500">
-        transparent
-      </Badge>
+      <span className={`inline-flex h-5 items-center rounded-md border px-1.5 text-[10px] font-medium uppercase tracking-wider ${map[a]}`}>
+        {a}
+      </span>
     )
-  if (a === "anonymous")
-    return (
-      <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/15 text-emerald-500">
-        anonymous
-      </Badge>
-    )
-  if (a === "elite")
-    return (
-      <Badge variant="outline" className="border-indigo-500/30 bg-indigo-500/15 text-indigo-500">
-        elite
-      </Badge>
-    )
-  return <span className="text-muted-foreground">—</span>
+  }
+  return <span className="text-zinc-500">—</span>
+}
+
+function latencyText(ms: number | null) {
+  if (ms == null) return <span className="text-zinc-500">—</span>
+  const cls = ms < 200 ? "text-emerald-300" : ms < 600 ? "text-amber-300" : "text-rose-300"
+  return <span className={`font-mono tabular-nums ${cls}`}>{ms} ms</span>
 }
 
 export default function Results() {
@@ -181,10 +197,19 @@ export default function Results() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Results</h2>
-          <p className="text-sm text-muted-foreground">
-            {filtered.length.toLocaleString()} of {MOCK_PROXIES.length.toLocaleString()} proxies
-            shown
+          <div className="section-label">Validation</div>
+          <h2 className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.02em] text-white">
+            Results
+          </h2>
+          <p className="mt-2 text-[13px] text-zinc-400">
+            <span className="font-mono tabular-nums text-zinc-200">
+              {filtered.length.toLocaleString()}
+            </span>{" "}
+            of{" "}
+            <span className="font-mono tabular-nums text-zinc-200">
+              {MOCK_PROXIES.length.toLocaleString()}
+            </span>{" "}
+            proxies shown
           </p>
         </div>
       </div>
@@ -365,8 +390,8 @@ export default function Results() {
                   </TableCell>
                   <TableCell>{typeBadge(p.type)}</TableCell>
                   <TableCell>{statusBadge(p.status)}</TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {p.latency != null ? `${p.latency} ms` : "—"}
+                  <TableCell className="text-right text-xs">
+                    {latencyText(p.latency)}
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     {p.host}:{p.port}

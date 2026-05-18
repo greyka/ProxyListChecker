@@ -27,10 +27,10 @@ function applyTheme(theme: ThemeName) {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeName>(() => {
-    if (typeof window === "undefined") return "light"
+    if (typeof window === "undefined") return "dark"
     const stored = localStorage.getItem(STORAGE_KEY) as ThemeName | null
     if (stored === "light" || stored === "dark" || stored === "matrix") return stored
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+    return "dark"
   })
 
   useEffect(() => {

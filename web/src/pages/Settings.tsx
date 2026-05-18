@@ -48,8 +48,11 @@ export default function Settings() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Settings</h2>
-          <p className="text-sm text-muted-foreground">
+          <div className="section-label">Preferences</div>
+          <h2 className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.02em] text-white">
+            Settings
+          </h2>
+          <p className="mt-2 text-[13px] text-zinc-400">
             Validation, sources, UI and network defaults.
           </p>
         </div>

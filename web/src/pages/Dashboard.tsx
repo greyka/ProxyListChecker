@@ -1,8 +1,8 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
 import {
   Activity,
+  ArrowUpRight,
   Download,
   Globe,
   Network,
@@ -11,14 +11,18 @@ import {
   Shield,
   Timer,
   TrendingUp,
+  type LucideIcon,
 } from "lucide-react"
 import {
+  Bar,
+  BarChart,
   Cell,
-  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts"
 import {
   STATS,
@@ -29,42 +33,123 @@ import {
 import { toast } from "sonner"
 import { useAppState } from "@/lib/app-state"
 
+type ToneKey = "blue" | "emerald" | "violet" | "amber"
+
+const TONE: Record<
+  ToneKey,
+  { grad: string; glow: string; ring: string; text: string }
+> = {
+  blue: {
+    grad: "linear-gradient(135deg, hsl(217 91% 60%), hsl(187 95% 50%))",
+    glow: "0 0 24px hsl(217 91% 60% / 0.5)",
+    ring: "hsl(217 91% 60% / 0.35)",
+    text: "text-gradient-blue",
+  },
+  emerald: {
+    grad: "linear-gradient(135deg, hsl(152 78% 50%), hsl(187 95% 50%))",
+    glow: "0 0 24px hsl(152 78% 50% / 0.45)",
+    ring: "hsl(152 78% 50% / 0.35)",
+    text: "text-gradient-emerald",
+  },
+  violet: {
+    grad: "linear-gradient(135deg, hsl(270 91% 65%), hsl(217 91% 60%))",
+    glow: "0 0 24px hsl(270 91% 65% / 0.5)",
+    ring: "hsl(270 91% 65% / 0.35)",
+    text: "text-gradient-violet",
+  },
+  amber: {
+    grad: "linear-gradient(135deg, hsl(38 92% 55%), hsl(350 89% 60%))",
+    glow: "0 0 24px hsl(38 92% 55% / 0.45)",
+    ring: "hsl(38 92% 55% / 0.35)",
+    text: "text-gradient-amber",
+  },
+}
+
 function StatCard({
   icon: Icon,
   label,
   value,
   sub,
   tone,
+  delta,
+  index,
 }: {
-  icon: typeof Activity
+  icon: LucideIcon
   label: string
   value: string
   sub?: string
-  tone?: "default" | "success" | "info" | "warn"
+  tone: ToneKey
+  delta?: string
+  index: number
 }) {
-  const toneClass =
-    tone === "success"
-      ? "bg-emerald-500/10 text-emerald-500"
-      : tone === "info"
-      ? "bg-blue-500/10 text-blue-500"
-      : tone === "warn"
-      ? "bg-amber-500/10 text-amber-500"
-      : "bg-muted text-foreground"
+  const t = TONE[tone]
   return (
-    <Card>
-      <CardContent className="flex items-start justify-between p-5">
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.06, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={{ y: -2 }}
+      className="glass-panel glass-panel-hover relative overflow-hidden p-5"
+    >
+      {/* corner glow */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full blur-2xl opacity-40"
+        style={{ background: t.grad }}
+      />
+      <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">
-            {label}
+          <div className="section-label">{label}</div>
+          <div className={`text-[32px] font-semibold leading-none tracking-[-0.02em] tabular-nums ${t.text}`}>
+            {value}
           </div>
-          <div className="text-2xl font-semibold tracking-tight">{value}</div>
-          {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
+          {sub && (
+            <div className="pt-1.5 text-[11px] text-zinc-500">{sub}</div>
+          )}
         </div>
-        <div className={`grid h-10 w-10 place-items-center rounded-lg ${toneClass}`}>
-          <Icon className="h-5 w-5" />
+        <div
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white"
+          style={{
+            background: t.grad,
+            boxShadow: `${t.glow}, inset 0 1px 0 hsl(0 0% 100% / 0.18)`,
+          }}
+        >
+          <Icon className="h-4.5 w-4.5" strokeWidth={2.2} />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+      {delta && (
+        <div className="mt-3 inline-flex h-5 items-center gap-1 rounded-full bg-emerald-500/10 px-2 text-[11px] font-medium text-emerald-400">
+          <ArrowUpRight className="h-3 w-3" /> {delta}
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+const CHART_COLORS = [
+  "hsl(217 91% 60%)",
+  "hsl(187 95% 50%)",
+  "hsl(270 91% 65%)",
+  "hsl(152 78% 50%)",
+  "hsl(38 92% 55%)",
+  "hsl(350 89% 60%)",
+]
+
+function ChartTooltip({ active, payload }: { active?: boolean; payload?: any[] }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="glass-panel border-white/10 px-3 py-2 text-[12px]">
+      {payload.map((p) => (
+        <div key={p.name ?? p.dataKey} className="flex items-center gap-2 text-zinc-200">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: p.color ?? p.fill }}
+          />
+          <span className="text-zinc-400">{p.name ?? p.payload?.name}</span>
+          <span className="font-mono tabular-nums">{p.value}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -93,31 +178,37 @@ export default function Dashboard() {
   }
 
   const handleSave = () => {
-    toast.success("Saved valid_proxies.txt + by_type/", {
-      action: { label: "Open folder", onClick: () => {} },
-    })
+    toast.success("Saved valid_proxies.txt + by_type/")
   }
 
   const maxCountry = Math.max(...TOP_COUNTRIES.map((c) => c.count))
+
+  const typeData = TYPE_DISTRIBUTION.map((d, i) => ({
+    ...d,
+    fill: CHART_COLORS[i % CHART_COLORS.length],
+  }))
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Dashboard</h2>
-          <p className="text-sm text-muted-foreground">
-            Overview of the latest validation run.
+          <div className="section-label">Overview</div>
+          <h2 className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.02em] text-white">
+            Mission Control
+          </h2>
+          <p className="mt-2 text-[13px] text-zinc-400">
+            Latest validation run · {STATS.fetched.toLocaleString()} proxies in the pool
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={handleCollect}>
-            <Download className="mr-2 h-4 w-4" /> Collect
+          <Button variant="glass" onClick={handleCollect}>
+            <Download className="h-4 w-4" /> Collect
           </Button>
-          <Button onClick={handleValidate}>
-            <Play className="mr-2 h-4 w-4" /> Validate
+          <Button variant="accent" onClick={handleValidate}>
+            <Play className="h-4 w-4" /> Validate
           </Button>
-          <Button variant="outline" onClick={handleSave}>
-            <Save className="mr-2 h-4 w-4" /> Save valid
+          <Button variant="glass" onClick={handleSave}>
+            <Save className="h-4 w-4" /> Save valid
           </Button>
         </div>
       </div>
@@ -128,128 +219,187 @@ export default function Dashboard() {
           label="Fetched proxies"
           value={fmt(STATS.fetched)}
           sub="from 13 enabled sources"
+          tone="blue"
+          delta="+12.4%"
+          index={0}
         />
         <StatCard
           icon={Activity}
           label="Working"
           value={fmt(STATS.working)}
           sub={`${STATS.workingPct}% pass rate`}
-          tone="success"
+          tone="emerald"
+          delta="+3.1%"
+          index={1}
         />
         <StatCard
           icon={Shield}
           label="Anonymous"
           value={fmt(STATS.anonymous)}
           sub={`${STATS.anonymousPct}% of working`}
-          tone="info"
+          tone="violet"
+          index={2}
         />
         <StatCard
           icon={Timer}
           label="Avg latency"
           value={`${STATS.avgLatency} ms`}
           sub="across OK proxies"
-          tone="warn"
+          tone="amber"
+          index={3}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Activity className="h-4 w-4 text-muted-foreground" />
-              Proxy types
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="h-[280px]">
+        <div className="glass-panel p-5">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <div className="section-label">Distribution</div>
+              <div className="mt-1 flex items-center gap-2 text-[15px] font-semibold text-white">
+                <Activity className="h-4 w-4 text-zinc-400" />
+                Proxy types
+              </div>
+            </div>
+          </div>
+          <div className="h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
+                <defs>
+                  {CHART_COLORS.map((c, i) => (
+                    <radialGradient key={i} id={`pie-grad-${i}`} cx="50%" cy="50%" r="80%">
+                      <stop offset="0%" stopColor={c} stopOpacity={0.95} />
+                      <stop offset="100%" stopColor={c} stopOpacity={0.7} />
+                    </radialGradient>
+                  ))}
+                </defs>
                 <Pie
-                  data={TYPE_DISTRIBUTION}
+                  data={typeData}
                   dataKey="value"
                   nameKey="name"
-                  innerRadius={55}
-                  outerRadius={95}
-                  paddingAngle={2}
-                  stroke="var(--background)"
+                  innerRadius={62}
+                  outerRadius={100}
+                  paddingAngle={3}
+                  stroke="hsl(220 24% 4%)"
+                  strokeWidth={2}
+                  animationDuration={900}
                 >
-                  {TYPE_DISTRIBUTION.map((d) => (
-                    <Cell key={d.name} fill={d.color} />
+                  {typeData.map((_, i) => (
+                    <Cell key={i} fill={`url(#pie-grad-${i})`} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{
-                    background: "var(--popover)",
-                    color: "var(--popover-foreground)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
-                />
-                <Legend
-                  verticalAlign="bottom"
-                  iconType="circle"
-                  wrapperStyle={{ fontSize: 12 }}
-                />
+                <Tooltip content={<ChartTooltip />} />
               </PieChart>
             </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              Top sources by yield
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {TOP_SOURCES.map((s) => (
-              <div key={s.repo} className="space-y-1.5">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-mono text-xs">{s.repo}</span>
-                  <span className="text-muted-foreground">
-                    <span className="font-semibold text-foreground">{s.yield}%</span>{" "}
-                    · {s.working} OK
-                  </span>
-                </div>
-                <Progress value={(s.yield / 5) * 100} />
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Globe className="h-4 w-4 text-muted-foreground" />
-            Exit geography
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
-            {TOP_COUNTRIES.map((c) => (
-              <div key={c.code} className="flex items-center gap-3">
-                <span className="inline-flex h-6 w-9 items-center justify-center rounded border bg-muted/40 font-mono text-[10px] tracking-wider text-muted-foreground">
-                  {c.code}
-                </span>
-                <span className="w-44 truncate text-sm">{c.country}</span>
-                <div className="flex-1">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${(c.count / maxCountry) * 100}%` }}
-                    />
-                  </div>
-                </div>
-                <span className="w-12 text-right font-mono text-xs text-muted-foreground">
-                  {c.count}
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {typeData.map((d, i) => (
+              <div key={d.name} className="flex items-center gap-2 text-[12px] text-zinc-400">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{
+                    background: CHART_COLORS[i],
+                    boxShadow: `0 0 8px ${CHART_COLORS[i]}80`,
+                  }}
+                />
+                <span className="text-zinc-300">{d.name}</span>
+                <span className="ml-auto font-mono tabular-nums text-zinc-500">
+                  {d.value.toLocaleString()}
                 </span>
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        <div className="glass-panel p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="section-label">Performance</div>
+              <div className="mt-1 flex items-center gap-2 text-[15px] font-semibold text-white">
+                <TrendingUp className="h-4 w-4 text-zinc-400" />
+                Top sources by yield
+              </div>
+            </div>
+          </div>
+          <div className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={TOP_SOURCES.map((s) => ({ name: s.repo.split("/").pop(), yield: s.yield, working: s.working }))}
+                layout="vertical"
+                margin={{ top: 4, right: 12, left: 8, bottom: 4 }}
+              >
+                <defs>
+                  <linearGradient id="bar-grad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="hsl(217 91% 60%)" stopOpacity={0.9} />
+                    <stop offset="100%" stopColor="hsl(187 95% 50%)" stopOpacity={0.9} />
+                  </linearGradient>
+                </defs>
+                <XAxis type="number" hide />
+                <YAxis
+                  dataKey="name"
+                  type="category"
+                  width={110}
+                  tick={{ fill: "hsl(240 4% 55%)", fontSize: 11, fontFamily: "JetBrains Mono" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip cursor={{ fill: "hsl(0 0% 100% / 0.04)" }} content={<ChartTooltip />} />
+                <Bar
+                  dataKey="yield"
+                  fill="url(#bar-grad)"
+                  radius={[6, 6, 6, 6]}
+                  animationDuration={800}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="glass-panel p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="section-label">Geography</div>
+            <div className="mt-1 flex items-center gap-2 text-[15px] font-semibold text-white">
+              <Globe className="h-4 w-4 text-zinc-400" />
+              Exit countries
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
+          {TOP_COUNTRIES.map((c, i) => (
+            <motion.div
+              key={c.code}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.04 }}
+              className="flex items-center gap-3"
+            >
+              <span className="inline-flex h-6 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] font-mono text-[10px] tracking-wider text-zinc-300">
+                {c.code}
+              </span>
+              <span className="w-40 truncate text-[13px] text-zinc-200">{c.country}</span>
+              <div className="flex-1">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.05]">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(c.count / maxCountry) * 100}%` }}
+                    transition={{ delay: i * 0.04, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+                    className="h-full rounded-full"
+                    style={{
+                      background:
+                        "linear-gradient(90deg, hsl(217 91% 60%), hsl(187 95% 50%))",
+                      boxShadow: "0 0 10px hsl(217 91% 60% / 0.4)",
+                    }}
+                  />
+                </div>
+              </div>
+              <span className="w-12 text-right font-mono text-[11px] tabular-nums text-zinc-400">
+                {c.count}
+              </span>
+            </motion.div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

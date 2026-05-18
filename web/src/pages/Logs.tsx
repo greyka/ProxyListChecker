@@ -47,9 +47,13 @@ export default function Logs() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Logs</h2>
-          <p className="text-sm text-muted-foreground">
-            {visible.length} of {logs.length} entries
+          <div className="section-label">Diagnostics</div>
+          <h2 className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.02em] text-white">
+            Logs
+          </h2>
+          <p className="mt-2 text-[13px] text-zinc-400">
+            <span className="font-mono tabular-nums text-zinc-200">{visible.length}</span>{" "}
+            of <span className="font-mono tabular-nums text-zinc-200">{logs.length}</span> entries
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
