@@ -92,34 +92,39 @@ public sealed class AppUpdater
             string currentExe = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "ProxyListChecker.exe");
             string targetDir = Path.GetDirectoryName(currentExe)!;
 
-            // Переименовать .exe (Windows позволяет даже когда он запущен)
-            string oldExe = currentExe + ".old";
-            try { if (File.Exists(oldExe)) File.Delete(oldExe); } catch { }
-            File.Move(currentExe, oldExe);
-            log($"Бэкап старого: {Path.GetFileName(oldExe)}");
-
-            // Скопировать все файлы из newExeDir в targetDir (без перезаписи .old)
-            int copied = 0;
+            // Копируем все файлы из распакованного билда. Если файл-получатель
+            // существует — пытаемся удалить, при неудаче (file locked) — переименовываем
+            // в *.old. Windows позволяет переименовать exe/dll даже когда они загружены
+            // в память текущего процесса.
+            int copied = 0, renamed = 0;
             foreach (var src in Directory.GetFiles(newExeDir, "*", SearchOption.AllDirectories))
             {
                 var rel2 = Path.GetRelativePath(newExeDir, src);
                 var dst = Path.Combine(targetDir, rel2);
                 Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-                try
+
+                if (File.Exists(dst))
                 {
-                    File.Copy(src, dst, overwrite: true);
-                    copied++;
+                    try { File.Delete(dst); }
+                    catch (IOException)
+                    {
+                        var stale = dst + ".old";
+                        try { if (File.Exists(stale)) File.Delete(stale); } catch { }
+                        try
+                        {
+                            File.Move(dst, stale);
+                            renamed++;
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new IOException($"Не могу освободить {Path.GetFileName(dst)}: {ex.Message}");
+                        }
+                    }
                 }
-                catch (IOException) when (string.Equals(Path.GetFileName(dst), Path.GetFileName(currentExe), StringComparison.OrdinalIgnoreCase))
-                {
-                    // если по каким-то причинам не удалось — пробуем через .new + последующее переименование
-                    var dstNew = dst + ".new";
-                    File.Copy(src, dstNew, overwrite: true);
-                    File.Move(dstNew, dst);
-                    copied++;
-                }
+                File.Copy(src, dst, overwrite: false);
+                copied++;
             }
-            log($"Скопировано файлов: {copied}");
+            log($"Скопировано файлов: {copied}, переименовано занятых: {renamed}");
             log($"Перезапуск…");
 
             // Стартуем новый exe и выходим
@@ -144,7 +149,7 @@ public sealed class AppUpdater
     {
         try
         {
-            foreach (var f in Directory.GetFiles(AppContext.BaseDirectory, "*.old", SearchOption.TopDirectoryOnly))
+            foreach (var f in Directory.GetFiles(AppContext.BaseDirectory, "*.old", SearchOption.AllDirectories))
             {
                 try { File.Delete(f); } catch { }
             }
