@@ -1,0 +1,57 @@
+# =========================================================
+#  ProxyListChecker — default proxy-list sources
+#  Тип определяется по имени файла (http/socks4/socks5)
+# =========================================================
+
+# --- TheSpeedX/PROXY-List (популярный, обновляется часто) ---
+https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt
+https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt
+https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt
+
+# --- monosans/proxy-list ---
+https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt
+https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt
+https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt
+
+# --- ShiftyTR/Proxy-List ---
+https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt
+https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/https.txt
+https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks4.txt
+https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt
+
+# --- hookzof/socks5_list ---
+https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt
+
+# --- proxifly/free-proxy-list ---
+https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt
+https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks4/data.txt
+https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt
+
+# --- zloi-user/hideip.me ---
+https://raw.githubusercontent.com/zloi-user/hideip.me/main/http.txt
+https://raw.githubusercontent.com/zloi-user/hideip.me/main/https.txt
+https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks4.txt
+https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt
+
+# --- clarketm/proxy-list ---
+https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt
+
+# --- mmpx12/proxy-list ---
+https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt
+https://raw.githubusercontent.com/mmpx12/proxy-list/master/https.txt
+https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks4.txt
+https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks5.txt
+
+# --- roosterkid/openproxylist ---
+https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt
+https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS4_RAW.txt
+https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt
+
+# --- API-агрегаторы ---
+https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all
+https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks4&timeout=10000&country=all
+https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5&timeout=10000&country=all
+https://www.proxy-list.download/api/v1/get?type=http
+https://www.proxy-list.download/api/v1/get?type=https
+https://www.proxy-list.download/api/v1/get?type=socks4
+https://www.proxy-list.download/api/v1/get?type=socks5
