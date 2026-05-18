@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.6.2";
+    public const string AppVersion = "0.6.3";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;

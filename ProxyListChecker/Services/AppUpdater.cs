@@ -105,8 +105,11 @@ public sealed class AppUpdater
 
                 if (File.Exists(dst))
                 {
-                    try { File.Delete(dst); }
-                    catch (IOException)
+                    bool deleted = false;
+                    try { File.Delete(dst); deleted = true; }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                    if (!deleted)
                     {
                         var stale = dst + ".old";
                         try { if (File.Exists(stale)) File.Delete(stale); } catch { }
