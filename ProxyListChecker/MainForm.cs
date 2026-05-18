@@ -7,7 +7,7 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.6.3";
+    public const string AppVersion = "0.7.0";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
@@ -26,6 +26,8 @@ public sealed class MainForm : Form
     private readonly Button _btnCopy;
     private readonly Button _btnPurgeFail;
     private readonly Button _btnDiscoverSources;
+    private readonly Button _btnMxCheck;
+    private readonly TextBox _mxHostBox;
     private readonly Button _btnUpdate;
     private readonly ProgressBar _progress;
     private readonly TextBox _log;
@@ -146,7 +148,8 @@ public sealed class MainForm : Form
         _btnCopy = new Button { Text = "Копировать в буфер" };
         _btnPurgeFail = new Button { Text = "Удалить нерабочие" };
         _btnDiscoverSources = new Button { Text = "🔍 Найти источники", BackColor = Color.FromArgb(240, 235, 220) };
-        foreach (var b in new[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources })
+        _btnMxCheck = new Button { Text = "📨 MX:25 чек", BackColor = Color.FromArgb(220, 235, 245) };
+        foreach (var b in new[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources, _btnMxCheck })
         {
             b.AutoSize = true;
             b.AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -154,7 +157,12 @@ public sealed class MainForm : Form
             b.Margin = new Padding(3);
             b.MinimumSize = new Size(0, 34);
         }
-        buttons.Controls.AddRange(new Control[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources });
+        _mxHostBox = new TextBox { Text = "gmail-smtp-in.l.google.com", Width = 220, Margin = new Padding(2, 6, 2, 0) };
+        var tipMx = new ToolTip(); tipMx.SetToolTip(_mxHostBox,
+            "SMTP-сервер для проверки порта 25 через прокси.\n" +
+            "OK = через прокси открылся TCP-туннель к указанному хосту:25 и получен banner '220 …'.\n\n" +
+            "Варианты: gmail-smtp-in.l.google.com, mxa.mail.ru, mta-sts.outlook.com, alt1.aspmx.l.google.com");
+        buttons.Controls.AddRange(new Control[] { _btnCollect, _btnCheck, _btnStop, _btnSave, _btnCopy, _btnPurgeFail, _btnDiscoverSources, _btnMxCheck, _mxHostBox });
         root.Controls.Add(buttons, 0, 1);
         root.SetColumnSpan(buttons, 2);
 
@@ -182,6 +190,7 @@ public sealed class MainForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Addr", HeaderText = "Адрес", DataPropertyName = nameof(RowVm.Address), FillWeight = 14, MinimumWidth = 140, ReadOnly = true });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Exit", HeaderText = "Exit IP", DataPropertyName = nameof(RowVm.ExitIp), FillWeight = 12, MinimumWidth = 110, ReadOnly = true });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Anon", HeaderText = "Anonimity", DataPropertyName = nameof(RowVm.Anonymity), FillWeight = 8, MinimumWidth = 80, ReadOnly = true });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Mx25", HeaderText = "MX:25", DataPropertyName = nameof(RowVm.Mx25), FillWeight = 8, MinimumWidth = 80, ReadOnly = true });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Err", HeaderText = "Ошибка / источник", DataPropertyName = nameof(RowVm.Note), FillWeight = 40, MinimumWidth = 200, ReadOnly = true, DefaultCellStyle = new DataGridViewCellStyle { Font = new Font("Consolas", 8.5f) } });
         _grid.DataSource = _rows;
         root.Controls.Add(_grid, 0, 3);
@@ -214,6 +223,7 @@ public sealed class MainForm : Form
         _btnCopy.Click += OnCopy;
         _btnPurgeFail.Click += OnPurge;
         _btnDiscoverSources.Click += async (_, _) => await OnDiscoverSources();
+        _btnMxCheck.Click += async (_, _) => await OnMxCheck();
         _btnUpdate.Click += async (_, _) => await OnUpdateApp();
         _themeBox.SelectedIndexChanged += (_, _) => ApplyCurrentTheme();
 
@@ -277,6 +287,7 @@ public sealed class MainForm : Form
         _btnCopy.Enabled = !busy;
         _btnPurgeFail.Enabled = !busy;
         _btnDiscoverSources.Enabled = !busy;
+        _btnMxCheck.Enabled = !busy;
         _btnStop.Enabled = busy;
     }
 
@@ -504,6 +515,79 @@ public sealed class MainForm : Form
         Log($"Удалено {toRemove.Count}. Осталось {_rows.Count}.");
     }
 
+    private async Task OnMxCheck()
+    {
+        // Цель — рабочие прокси (OK). Если ничего не проверено — берём всё (тогда чекаем сами TCP-связность к MX через прокси).
+        var targets = _rows.Where(r => r.Status == "OK").ToList();
+        if (targets.Count == 0) targets = _rows.ToList();
+        if (targets.Count == 0)
+        {
+            MessageBox.Show(this, "Сначала «Собрать» (и желательно «Проверить»).", "Пусто", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var mxHost = _mxHostBox.Text.Trim();
+        if (string.IsNullOrEmpty(mxHost)) mxHost = "gmail-smtp-in.l.google.com";
+
+        _cts = new CancellationTokenSource();
+        SetBusy(true);
+        int threads = (int)_threadsBox.Value;
+        int timeoutMs = (int)_timeoutBox.Value;
+
+        _progress.Minimum = 0; _progress.Maximum = targets.Count; _progress.Value = 0;
+        Log($"📨 MX:25 чек: {targets.Count} прокси через TCP-туннель → {mxHost}:25, потоков {threads}");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        int done = 0, ok = 0;
+        var checker = new MxChecker { MxHost = mxHost, MxPort = 25, Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+        using var sem = new SemaphoreSlim(threads, threads);
+
+        try
+        {
+            var tasks = new List<Task>(targets.Count);
+            // индексы в _rows для каждой целевой строки
+            var indexMap = new Dictionary<RowVm, int>();
+            for (int i = 0; i < _rows.Count; i++) indexMap[_rows[i]] = i;
+
+            foreach (var row in targets)
+            {
+                if (_cts.Token.IsCancellationRequested) break;
+                int rowIdx = indexMap[row];
+                tasks.Add(Task.Run(async () =>
+                {
+                    if (_cts.Token.IsCancellationRequested) return;
+                    await sem.WaitAsync(_cts.Token);
+                    try
+                    {
+                        if (_cts.Token.IsCancellationRequested) return;
+                        var r = await checker.CheckAsync(row.Entry, _cts.Token);
+                        if (r.Ok) Interlocked.Increment(ref ok);
+                        BeginInvoke(() =>
+                        {
+                            row.Mx25 = r.Ok ? $"OK {r.LatencyMs}ms" : $"FAIL {(r.Error ?? "")}";
+                            if (rowIdx < _rows.Count && _rows[rowIdx] == row) _rows.ResetItem(rowIdx);
+                            int d = Interlocked.Increment(ref done);
+                            if (d % 16 == 0 || d == targets.Count)
+                            {
+                                _progress.Value = Math.Min(d, _progress.Maximum);
+                                SetStatus($"MX:25: {d}/{targets.Count}", $"OK: {ok}");
+                            }
+                        });
+                    }
+                    catch (OperationCanceledException) { }
+                    finally { sem.Release(); }
+                }, _cts.Token));
+            }
+            await Task.WhenAll(tasks);
+            sw.Stop();
+            Log($"📨 MX:25 готово за {sw.Elapsed.TotalSeconds:F1}с — поддерживают порт 25: {ok}/{targets.Count}");
+            SetStatus("Готов", $"MX:25 OK: {ok}/{targets.Count}");
+        }
+        catch (OperationCanceledException) { Log("Отменено."); }
+        catch (Exception ex) { Log("Ошибка MX чек: " + ex.Message); }
+        finally { SetBusy(false); }
+    }
+
     private async Task OnDiscoverSources()
     {
         _btnDiscoverSources.Enabled = false;
@@ -618,5 +702,6 @@ public sealed class RowVm
     public string Address { get; set; } = "";
     public string ExitIp { get; set; } = "";
     public string Anonymity { get; set; } = "";
+    public string Mx25 { get; set; } = "";
     public string Note { get; set; } = "";
 }
