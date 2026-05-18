@@ -7,12 +7,14 @@ namespace ProxyListChecker;
 
 public sealed class MainForm : Form
 {
-    public const string AppVersion = "0.1.0";
+    public const string AppVersion = "0.2.0";
     private static readonly string CachePath = Path.Combine(AppContext.BaseDirectory, "test_cache.json");
 
     private readonly TextBox _sourcesBox;
     private readonly NumericUpDown _threadsBox;
     private readonly NumericUpDown _timeoutBox;
+    private readonly NumericUpDown _checkLimitBox;
+    private readonly CheckBox _shuffleBox;
     private readonly TextBox _testUrlBox;
     private readonly ComboBox _typeFilterBox;
     private readonly ComboBox _themeBox;
@@ -55,7 +57,7 @@ public sealed class MainForm : Form
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6 };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 540));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 270)); // header
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 330)); // header
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 100)); // buttons
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));  // progress
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 70));   // grid
@@ -71,11 +73,11 @@ public sealed class MainForm : Form
 
         // ====== options ======
         var optGroup = new GroupBox { Text = "Параметры", Dock = DockStyle.Fill, Padding = new Padding(8) };
-        var opt = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 7 };
+        var opt = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 9 };
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         opt.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
-        for (int i = 0; i < 7; i++) opt.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        for (int i = 0; i < 9; i++) opt.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         optGroup.Controls.Add(opt);
         root.Controls.Add(optGroup, 1, 0);
 
@@ -101,18 +103,28 @@ public sealed class MainForm : Form
 
         opt.Controls.Add(MakeLabel("Тест URL:"), 0, 4);
         _testUrlBox = new TextBox { Text = "https://api.ipify.org", Dock = DockStyle.Fill };
+        var tipTest = new ToolTip(); tipTest.SetToolTip(_testUrlBox, "URL, на который пойдёт запрос через каждый прокси.\nOK = успешный ответ. Если URL отдаёт IP — он попадает в Exit IP.");
         opt.Controls.Add(_testUrlBox, 1, 4);
 
-        opt.Controls.Add(MakeLabel("Подсказка:"), 0, 5);
+        opt.Controls.Add(MakeLabel("Лимит проверки:"), 0, 5);
+        _checkLimitBox = new NumericUpDown { Minimum = 0, Maximum = 100000, Value = 1000, Increment = 100, Anchor = AnchorStyles.Left, Width = 100 };
+        var tipLimit = new ToolTip(); tipLimit.SetToolTip(_checkLimitBox, "Сколько прокси проверить за один запуск (0 = все).\nПри включённом перемешивании каждый запуск даёт разную выборку.");
+        opt.Controls.Add(_checkLimitBox, 1, 5);
+
+        opt.Controls.Add(MakeLabel("Случайная выборка:"), 0, 6);
+        _shuffleBox = new CheckBox { Text = "перемешивать перед проверкой", Checked = true, Anchor = AnchorStyles.Left, AutoSize = true };
+        opt.Controls.Add(_shuffleBox, 1, 6);
+
+        opt.Controls.Add(MakeLabel("Подсказка:"), 0, 7);
         var hint = new Label { Text = "1) «Собрать» → 2) «Проверить» → «Сохранить рабочие».", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DimGray, Tag = "hint" };
-        opt.Controls.Add(hint, 1, 5);
+        opt.Controls.Add(hint, 1, 7);
         opt.SetColumnSpan(hint, 2);
 
-        opt.Controls.Add(MakeLabel("Тема:"), 0, 6);
+        opt.Controls.Add(MakeLabel("Тема:"), 0, 8);
         _themeBox = new ComboBox { Dock = DockStyle.Left, Width = 160, DropDownStyle = ComboBoxStyle.DropDownList };
         _themeBox.Items.AddRange(new object[] { "Светлая", "Матрица" });
         _themeBox.SelectedIndex = 0;
-        opt.Controls.Add(_themeBox, 1, 6);
+        opt.Controls.Add(_themeBox, 1, 8);
 
         // ====== buttons ======
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(4), WrapContents = true };
@@ -256,8 +268,10 @@ public sealed class MainForm : Form
 
     private async Task OnCollect()
     {
-        var urls = _sourcesBox.Lines.Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#")).ToArray();
-        if (urls.Length == 0) { MessageBox.Show(this, "Укажите URL источников.", "Нет источников", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        var urls = _sourcesBox.Lines.Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#")).ToList();
+        if (urls.Count == 0) { MessageBox.Show(this, "Укажите URL источников.", "Нет источников", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        // Каждый сбор — случайный порядок источников
+        if (_shuffleBox.Checked) for (int i = urls.Count - 1; i > 0; i--) { int j = Random.Shared.Next(i + 1); (urls[i], urls[j]) = (urls[j], urls[i]); }
 
         _cts = new CancellationTokenSource();
         SetBusy(true); SetStatus("Сбор…");
@@ -298,11 +312,18 @@ public sealed class MainForm : Form
 
         int threads = (int)_threadsBox.Value;
         int timeoutMs = (int)_timeoutBox.Value;
+        int limit = (int)_checkLimitBox.Value;
+        bool shuffle = _shuffleBox.Checked;
         string testUrl = _testUrlBox.Text.Trim();
         if (string.IsNullOrEmpty(testUrl)) testUrl = "https://api.ipify.org";
 
-        _progress.Minimum = 0; _progress.Maximum = _collected.Count; _progress.Value = 0;
-        Log($"Проверка: {_collected.Count} прокси, потоков {threads}, таймаут {timeoutMs}мс, тест {testUrl}");
+        // Выбираем индексы для проверки: с перемешиванием + лимитом → каждый запуск разная выборка
+        var indices = Enumerable.Range(0, _collected.Count).ToList();
+        if (shuffle) for (int i = indices.Count - 1; i > 0; i--) { int j = Random.Shared.Next(i + 1); (indices[i], indices[j]) = (indices[j], indices[i]); }
+        if (limit > 0 && indices.Count > limit) indices = indices.Take(limit).ToList();
+
+        _progress.Minimum = 0; _progress.Maximum = indices.Count; _progress.Value = 0;
+        Log($"Проверка: {indices.Count} из {_collected.Count} (shuffle={shuffle}, limit={limit}), потоков {threads}, таймаут {timeoutMs}мс, тест {testUrl}");
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         int done = 0, ok = 0, cacheHits = 0;
@@ -318,32 +339,33 @@ public sealed class MainForm : Form
         using var sem = new SemaphoreSlim(threads, threads);
         try
         {
-            var tasks = new List<Task>(_collected.Count);
-            for (int i = 0; i < _collected.Count; i++)
+            var tasks = new List<Task>(indices.Count);
+            int total = indices.Count;
+            foreach (int idx in indices)
             {
-                int idx = i;
+                int capturedIdx = idx;
                 await sem.WaitAsync(_cts.Token);
                 tasks.Add(Task.Run(async () =>
                 {
                     try
                     {
-                        var key = _collected[idx].ToString();
+                        var key = _collected[capturedIdx].ToString();
                         CheckResult r;
                         if (_cache.TryGet(key, out var hit))
                         {
-                            r = new CheckResult { Entry = _collected[idx], Ok = hit.Ok, LatencyMs = hit.LatencyMs, ExitIp = hit.ExitIp, Country = hit.Country, Anonymity = hit.Anonymity, Error = hit.Error };
+                            r = new CheckResult { Entry = _collected[capturedIdx], Ok = hit.Ok, LatencyMs = hit.LatencyMs, ExitIp = hit.ExitIp, Country = hit.Country, Anonymity = hit.Anonymity, Error = hit.Error };
                             Interlocked.Increment(ref cacheHits);
                         }
                         else
                         {
-                            r = await validator.CheckAsync(_collected[idx], _cts.Token);
+                            r = await validator.CheckAsync(_collected[capturedIdx], _cts.Token);
                             _cache.Put(key, r);
                         }
                         if (r.Ok) Interlocked.Increment(ref ok);
-                        pending.Enqueue((idx, r));
+                        pending.Enqueue((capturedIdx, r));
                         int d = Interlocked.Increment(ref done);
-                        if (d % 32 == 0 || d == _collected.Count)
-                            BeginInvoke(() => { _progress.Value = Math.Min(d, _progress.Maximum); SetStatus($"Проверка: {d}/{_collected.Count}", $"OK: {ok} · кэш: {cacheHits}"); FlushBatch(); });
+                        if (d % 32 == 0 || d == total)
+                            BeginInvoke(() => { _progress.Value = Math.Min(d, _progress.Maximum); SetStatus($"Проверка: {d}/{total}", $"OK: {ok} · кэш: {cacheHits}"); FlushBatch(); });
                     }
                     finally { sem.Release(); }
                 }, _cts.Token));
@@ -352,8 +374,8 @@ public sealed class MainForm : Form
             while (!pending.IsEmpty) FlushBatch();
             sw.Stop();
             _cache.Save();
-            Log($"Готово за {sw.Elapsed.TotalSeconds:F1}с. OK: {ok}/{_collected.Count}, кэш-хитов: {cacheHits}");
-            SetStatus("Готов", $"OK: {ok}/{_collected.Count}");
+            Log($"Готово за {sw.Elapsed.TotalSeconds:F1}с. OK: {ok}/{total}, кэш-хитов: {cacheHits}");
+            SetStatus("Готов", $"OK: {ok}/{total}");
         }
         catch (OperationCanceledException) { _cache.Save(); Log("Отменено."); }
         catch (Exception ex) { Log("Ошибка: " + ex.Message); }
